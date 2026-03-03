@@ -120,7 +120,7 @@ Tailscale SSH umožňuje přístup bez správy SSH klíčů na VM. Po `tailscale
 | `location`               | `"westeurope"`                   | Azure region                                                         |
 | `vm_size`                | `"Standard_B4as_v2"`             | Velikost VM (4 vCPU, 16 GB RAM)                                      |
 | `os_disk_size_gb`        | `128`                            | Velikost OS disku v GB                                               |
-| `os_disk_type`           | `"Standard_LRS"`                 | Typ disku (Standard_LRS / Premium_LRS)                               |
+| `os_disk_type`           | `"StandardSSD_LRS"`              | Typ disku (StandardSSD_LRS / Premium_LRS)                            |
 | `admin_username`         | `"devuser"`                      | Uživatelské jméno na VM                                              |
 | `ssh_public_key`         | `"~/.ssh/id_rsa.pub"`            | Cesta k veřejnému SSH klíči (fallback pokud Tailscale SSH nefunguje) |
 | `auto_shutdown_time`     | `"2200"`                         | Čas auto-shutdown ve formátu HHMM (lokální čas)                      |

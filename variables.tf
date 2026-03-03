@@ -34,9 +34,9 @@ variable "os_disk_size_gb" {
 }
 
 variable "os_disk_type" {
-  description = "OS disk storage account type (Standard_LRS or Premium_LRS)"
+  description = "OS disk storage account type (StandardSSD_LRS or Premium_LRS)"
   type        = string
-  default     = "Standard_LRS"
+  default     = "StandardSSD_LRS"
 }
 
 variable "admin_username" {
