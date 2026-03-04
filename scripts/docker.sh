@@ -23,11 +23,7 @@ chmod a+r /etc/apt/keyrings/docker.asc
 echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/${DISTRO} ${CODENAME} stable" \
   > /etc/apt/sources.list.d/docker.list
 
-apt-get update
-apt-get install -y docker-ce docker-ce-cli containerd.io \
-  docker-buildx-plugin docker-compose-plugin
-
-# Logging config — zapsat PŘED prvním startem Dockeru
+# Logging config — zapsat PŘED instalací, protože docker-ce postinst startuje Docker
 mkdir -p /etc/docker
 cat > /etc/docker/daemon.json <<'DAEMON'
 {
@@ -39,6 +35,9 @@ cat > /etc/docker/daemon.json <<'DAEMON'
 }
 DAEMON
 
+apt-get update
+apt-get install -y docker-ce docker-ce-cli containerd.io \
+  docker-buildx-plugin docker-compose-plugin
+
 usermod -aG docker "$DOCKER_USER"
 systemctl enable docker
-systemctl start docker
