@@ -6,9 +6,9 @@ Setup skripty pro remote development host. Podporuje dva targety:
 - **Azure VM** — Terraform provisioning s cloud-init
 - **Debian server** — přímá instalace přes shell skript
 
-Na hostu pak běží devcontainery generované pomocí [claude-devcontainer-generator](https://github.com/JosefBackovsky/claude-devcontainer-generator).
-
 ## Architektura
+
+### Repo struktura
 
 ```
 scripts/           sdílené skripty (Docker, Tailscale, Portainer, volumes)
@@ -19,6 +19,38 @@ cloud-init.tpl     install.sh
 (embedduje         (volá skripty
  skripty přes       přímo z disku)
  write_files)
+```
+
+### Stav serveru s projekty
+
+```
+Dev Host (Azure VM nebo Debian server)
+├── Docker Engine
+├── Tailscale
+├── Portainer (web UI, port 9443)
+│
+├── projekt-a (docker-compose)
+│   ├── devcontainer (SSH :2222)
+│   ├── postgres
+│   └── redis
+│
+├── projekt-b (docker-compose)
+│   ├── devcontainer (SSH :2223)
+│   └── mongo
+│
+├── Docker volumes
+│   ├── claude-shared             (sdílené credentials)
+│   ├── projekt-a-claude-project
+│   ├── projekt-a-commandhistory
+│   ├── projekt-b-claude-project
+│   ├── ...
+│   └── portainer_data
+│
+└── ~/projects/
+    ├── projekt-a-devcontainer/
+    ├── projekt-a/
+    ├── projekt-b-devcontainer/
+    └── projekt-b/
 ```
 
 Každý skript v `scripts/` je:
@@ -43,6 +75,37 @@ Důležité:
 - `vm.tf` má `lifecycle { ignore_changes = [custom_data] }` — změna skriptů nevynutí re-create VM
 - Terraform `file()` čte skripty z `../scripts/` relativně k `azure/`
 
+### Co Terraform vytvoří
+
+1. **Virtual Network + Subnet** — izolovaná síť pro VM
+2. **Network Security Group** — povolený jen Tailscale UDP 41641 inbound, vše ostatní deny
+3. **Network Interface** — bez veřejné IP adresy
+4. **Linux VM** (Standard_B4as_v2) — Ubuntu 24.04 LTS
+5. **OS Disk** — 128 GB Standard SSD (Premium SSD volitelně)
+6. **Auto-shutdown schedule** — deallocate VM ve 22:00
+
+### Cloud-init provisioning
+
+Při prvním startu VM cloud-init:
+1. Nainstaluje prerequisity (curl, ca-certificates, gnupg, git)
+2. Zapíše sdílené skripty do `/opt/setup/` přes `write_files`
+3. Spustí skripty v pořadí: docker → tailscale → portainer → shared-volumes
+
+### Denní workflow (Azure)
+
+```bash
+# Ráno — nastartujte VM (pokud byla auto-shutdown)
+az vm start -g <resource_group> -n devbox
+
+# VM naběhne, Tailscale se automaticky připojí, Portainer a kontejnery běží
+
+# Večer — VM se vypne automaticky ve 22:00 (auto-shutdown)
+# Nebo ručně:
+az vm deallocate -g <resource_group> -n devbox
+```
+
+`deallocate` (ne `stop`) uvolní compute hardware a přestanete platit za CPU. Disk zůstává (~€8/měsíc za 128 GB Standard SSD). Data přežijí deallocate.
+
 ## Debian target
 
 `debian/install.sh` orchestruje volání skriptů:
@@ -55,9 +118,43 @@ Důležité:
 
 Konfigurace přes CLI flags (`--username`, `--tailscale`, `--tailscale-hostname`).
 
+## Jak se připojit
+
+### VS Code (přes Docker socket)
+
+1. Remote-SSH → `<user>@<tailscale_ip_nebo_hostname>`
+2. SSH session na hostu (port 22)
+3. Otevřete projekt → "Reopen in Container" → VS Code přes `docker exec` spustí server uvnitř kontejneru
+4. Víc VS Code oken = víc SSH sessions přes stejný port 22
+
+### PyCharm / JetBrains (přes SSH port do kontejneru)
+
+JetBrains IDE neumí Dev Containers. Používá SSH Remote Interpreter přímo do kontejneru:
+- Host: `<tailscale_ip>`, Port: 2222 (nebo 2223, 2224...), User: `node`
+- Každý kontejner má unikátní SSH port
+
+### Portainer (prohlížeč)
+
+- `https://<hostname>:9443`
+- Start/stop kontejnerů, logy, resource monitoring
+
+### Terminál
+
+- SSH na host → `docker exec -it <kontejner> bash`
+
+## Bezpečnost
+
+- **Azure:** žádná veřejná IP — přístup výhradně přes Tailscale VPN
+- NSG povoluje jen Tailscale UDP port 41641 (přímé P2P spojení)
+- **Debian:** přístup přes LAN nebo Tailscale
+- Tailscale SSH umožňuje přístup bez správy SSH klíčů (`tailscale up --ssh`)
+- Portainer přístupný jen z Tailscale sítě / LAN
+- VM/server uživatel je v `docker` skupině, ne root
+- Sensitive data nikdy v gitu (terraform.tfvars v .gitignore)
+
 ## Konvence
 
 - Bash skripty: `set -euo pipefail`, `shellcheck` clean
 - Terraform: >= 1.5, AzureRM >= 3.0, flat struktura v `azure/`
-- Sensitive data: nikdy v gitu (terraform.tfvars, .env jsou v .gitignore)
+- Sensitive data: nikdy v gitu (terraform.tfvars v .gitignore)
 - Commit messages: conventional commits (feat/fix/docs)
