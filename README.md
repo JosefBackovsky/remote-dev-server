@@ -78,9 +78,9 @@ az vm deallocate -g <resource_group> -n devbox
 | `location` | `"westeurope"` | Azure region |
 | `vm_size` | `"Standard_B4as_v2"` | VM size (4 vCPU, 16 GB RAM) |
 | `os_disk_size_gb` | `128` | OS disk size in GB |
-| `os_disk_type` | `"Standard_LRS"` | Disk type (Standard_LRS / Premium_LRS) |
+| `os_disk_type` | `"StandardSSD_LRS"` | Disk type (StandardSSD_LRS / Premium_LRS) |
 | `admin_username` | `"devuser"` | VM admin username |
-| `ssh_public_key` | `"~/.ssh/id_rsa.pub"` | Path to SSH public key |
+| `ssh_public_key` | `"~/.ssh/id_ed25519_devbox.pub"` | Path to SSH public key |
 | `auto_shutdown_time` | `"2200"` | Auto-shutdown time (HHMM) |
 | `auto_shutdown_timezone` | `"Central Europe Standard Time"` | Timezone for auto-shutdown |
 
@@ -93,6 +93,16 @@ az vm deallocate -g <resource_group> -n devbox
 | `tailscale_note` | Instructions to find the Tailscale IP |
 | `portainer_url` | Portainer web UI URL |
 | `ssh_command` | SSH command using Tailscale hostname |
+
+## Changing OS Disk
+
+Disk size and type can be changed via `os_disk_size_gb` and `os_disk_type` variables without recreating the VM. Terraform will automatically deallocate the VM, update the disk, and start it again (same as Azure Portal).
+
+```bash
+# Example: switch to Premium SSD
+# In terraform.tfvars: os_disk_type = "Premium_LRS"
+terraform apply
+```
 
 ## Cost Estimate
 
