@@ -9,8 +9,7 @@
 terraform.tfvars
 *.auto.tfvars
 
-# Environment
-debian/.env
+# OS
 
 # OS
 .DS_Store

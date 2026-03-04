@@ -109,10 +109,14 @@ resource "azurerm_linux_virtual_machine" "main" {
     tailscale_auth_key = var.tailscale_auth_key
     admin_username     = var.admin_username
     vm_name            = var.vm_name
+    docker_sh          = file("${path.module}/../scripts/docker.sh")
+    tailscale_sh       = file("${path.module}/../scripts/tailscale.sh")
+    portainer_sh       = file("${path.module}/../scripts/portainer.sh")
+    shared_volumes_sh  = file("${path.module}/../scripts/shared-volumes.sh")
   }))
 
   lifecycle {
-    ignore_changes = [os_disk[0].disk_size_gb, os_disk[0].storage_account_type]
+    ignore_changes = [custom_data, os_disk[0].disk_size_gb, os_disk[0].storage_account_type]
   }
 }
 
