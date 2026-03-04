@@ -1,33 +1,42 @@
-# DevBox — Azure VM pro vzdálený vývoj
+# remote-dev-server
 
 ## Co to je
 
-Terraform konfigurace, která vytvoří Azure VM sloužící jako vzdálený Docker host pro devcontainery generované pomocí [claude-devcontainer-generator](https://github.com/keeema/claude-devcontainer-generator). Na VM běží víc devcontainerů současně, vývojář se připojuje přes VS Code Remote nebo JetBrains SSH Interpreter.
+Setup skripty pro remote development host. Podporuje dva targety:
+- **Azure VM** — Terraform provisioning s cloud-init
+- **Debian server** — přímá instalace přes shell skript
 
 ## Architektura
 
+### Repo struktura
+
 ```
-MacBook (VS Code / PyCharm / prohlížeč)
-│
-│ Tailscale VPN (žádná veřejná IP)
-│
-Azure VM "devbox" (B4as_v2, 4 vCPU, 16 GB RAM, Ubuntu 24.04)
+scripts/           sdílené skripty (Docker, Tailscale, Portainer, volumes)
+  ↑                   ↑
+  │                   │
+azure/             debian/
+cloud-init.tpl     install.sh
+(embedduje         (volá skripty
+ skripty přes       přímo z disku)
+ write_files)
+```
+
+### Stav serveru s projekty
+
+```
+Dev Host (Azure VM nebo Debian server)
 ├── Docker Engine
 ├── Tailscale
 ├── Portainer (web UI, port 9443)
 │
 ├── projekt-a (docker-compose)
-│   ├── devcontainer (SSH :2222, Claude v tmux)
+│   ├── devcontainer (SSH :2222)
 │   ├── postgres
 │   └── redis
 │
 ├── projekt-b (docker-compose)
-│   ├── devcontainer (SSH :2223, Claude v tmux)
+│   ├── devcontainer (SSH :2223)
 │   └── mongo
-│
-├── projekt-c (docker-compose)
-│   ├── devcontainer (SSH :2224, Claude v tmux)
-│   └── postgres
 │
 ├── Docker volumes
 │   ├── claude-shared             (sdílené credentials)
@@ -41,195 +50,111 @@ Azure VM "devbox" (B4as_v2, 4 vCPU, 16 GB RAM, Ubuntu 24.04)
     ├── projekt-a-devcontainer/
     ├── projekt-a/
     ├── projekt-b-devcontainer/
-    ├── projekt-b/
-    ├── projekt-c-devcontainer/
-    └── projekt-c/
+    └── projekt-b/
 ```
 
-## Jak se vývojář připojuje
+Každý skript v `scripts/` je:
+- **Idempotentní** — bezpečný pro opakované spuštění
+- **Distro-agnostický** — detekuje Ubuntu/Debian přes `/etc/os-release`
+- **Parametrizovaný** — konfigurace přes argumenty příkazové řádky
 
-### VS Code (přes Docker socket — žádný extra port)
+## Sdílené skripty
 
-1. VS Code → `Cmd+Shift+P` → "Remote-SSH: Connect to Host" → `<vm_user>@<tailscale_ip>`
-2. SSH session na VM (port 22), VS Code nainstaluje svůj server na VM
-3. Otevře `~/projects/projekt-a-devcontainer`
-4. "Reopen in Container" → VS Code přes `docker exec` spustí svůj server uvnitř kontejneru
-5. Druhé VS Code okno → stejný postup, jiný projekt → běží současně
+| Skript | Guard | Chování |
+|--------|-------|---------|
+| `docker.sh <user>` | `command -v docker` | Instalace Docker CE, daemon.json (před startem), user do docker group |
+| `tailscale.sh <key> [hostname]` | `tailscale status` | Instalace + `tailscale up --ssh` |
+| `portainer.sh` | `docker ps -a` | Nový kontejner, nebo `docker start` pokud stopped |
+| `shared-volumes.sh <user>` | Přirozeně idempotentní | `docker volume create claude-shared`, `mkdir -p ~/projects` |
 
-VS Code používá Docker socket (`/var/run/docker.sock`), ne TCP porty. Víc VS Code oken se připojuje na VM přes stejný SSH port 22 (víc současných SSH sessions je standardní chování).
+## Azure target
 
-### PyCharm / JetBrains (přes SSH port do kontejneru)
+Terraform soubory v `azure/`. `cloud-init.tpl` embeduje skripty přes `write_files` (Terraform `file()` + `indent()`).
 
-JetBrains IDE neumí Dev Containers. Místo toho používá SSH Remote Interpreter přímo do kontejneru:
+Důležité:
+- `vm.tf` má `lifecycle { ignore_changes = [custom_data] }` — změna skriptů nevynutí re-create VM
+- Terraform `file()` čte skripty z `../scripts/` relativně k `azure/`
 
-- Host: `<tailscale_ip>`, Port: 2222 (nebo 2223, 2224...), User: `node`
-- Každý kontejner má unikátní SSH port (nastavený při generování přes `--ssh-port`)
+### Co Terraform vytvoří
 
-### Portainer (prohlížeč, i z mobilu)
-
-- `https://<tailscale_ip>:9443`
-- Start/stop kontejnerů, logy, resource monitoring
-- Přístupný jen přes Tailscale VPN
-
-### Terminál / mobil
-
-- SSH na VM → `docker exec -it <kontejner> bash` → `tmux attach -t claude`
-- Z mobilu přes Termius nebo Tailscale SSH
-
-## Co Terraform vytvoří
-
-### Azure resources
-
-1. **Resource Group** — použije existující (vstupní proměnná)
-2. **Virtual Network + Subnet** — izolovaná síť pro VM
-3. **Network Security Group** — povolený jen Tailscale UDP 41641 inbound, vše ostatní deny
-4. **Network Interface** — bez veřejné IP adresy
-5. **Linux VM** (Standard_B4as_v2) — Ubuntu 24.04 LTS, burstable
-6. **OS Disk** — 128 GB Standard SSD (Premium SSD volitelně)
-7. **Auto-shutdown schedule** — deallocate VM ve 22:00 (šetří náklady)
+1. **Virtual Network + Subnet** — izolovaná síť pro VM
+2. **Network Security Group** — povolený jen Tailscale UDP 41641 inbound, vše ostatní deny
+3. **Network Interface** — bez veřejné IP adresy
+4. **Linux VM** (Standard_B4as_v2) — Ubuntu 24.04 LTS
+5. **OS Disk** — 128 GB Standard SSD (Premium SSD volitelně)
+6. **Auto-shutdown schedule** — deallocate VM ve 22:00
 
 ### Cloud-init provisioning
 
-Cloud-init se spustí při prvním startu VM a nainstaluje:
+Při prvním startu VM cloud-init:
+1. Nainstaluje prerequisity (curl, ca-certificates, gnupg, git)
+2. Zapíše sdílené skripty do `/opt/setup/` přes `write_files`
+3. Spustí skripty v pořadí: docker → tailscale → portainer → shared-volumes
 
-1. **Docker Engine** — apt repozitář, docker-ce, docker-compose-plugin
-2. **Tailscale** — nainstaluje, spustí `tailscale up --auth-key=<key> --ssh`
-3. **Portainer** — Docker kontejner na portu 9443
-4. **Git** — pro klonování repozitářů
-5. **Uživatel** — přidá do skupiny `docker`, nastaví SSH klíč
-6. **Docker volume** — `docker volume create claude-shared`
-
-### Tailscale SSH
-
-Tailscale SSH umožňuje přístup bez správy SSH klíčů na VM. Po `tailscale up --ssh` se můžete připojit z jakéhokoliv zařízení ve vaší Tailscale síti bez konfigurace authorized_keys. VS Code Remote-SSH funguje s Tailscale SSH.
-
-## Terraform proměnné
-
-### Povinné
-
-| Proměnná              | Typ                | Popis                                                                                                                          |
-| --------------------- | ------------------ | ------------------------------------------------------------------------------------------------------------------------------ |
-| `resource_group_name` | string             | Název existující Azure Resource Group                                                                                          |
-| `tailscale_auth_key`  | string (sensitive) | Tailscale auth key pro připojení VM do sítě. Vytvořte na https://login.tailscale.com/admin/settings/keys — reusable, ephemeral |
-
-### Volitelné
-
-| Proměnná                 | Default                          | Popis                                                                |
-| ------------------------ | -------------------------------- | -------------------------------------------------------------------- |
-| `vm_name`                | `"devbox"`                       | Název VM v Azure i hostname v Tailscale                              |
-| `location`               | `"westeurope"`                   | Azure region                                                         |
-| `vm_size`                | `"Standard_B4as_v2"`             | Velikost VM (4 vCPU, 16 GB RAM)                                      |
-| `os_disk_size_gb`        | `128`                            | Velikost OS disku v GB                                               |
-| `os_disk_type`           | `"StandardSSD_LRS"`              | Typ disku (StandardSSD_LRS / Premium_LRS)                            |
-| `admin_username`         | `"devuser"`                      | Uživatelské jméno na VM                                              |
-| `ssh_public_key`         | `"~/.ssh/id_rsa.pub"`            | Cesta k veřejnému SSH klíči (fallback pokud Tailscale SSH nefunguje) |
-| `auto_shutdown_time`     | `"2200"`                         | Čas auto-shutdown ve formátu HHMM (lokální čas)                      |
-| `auto_shutdown_timezone` | `"Central Europe Standard Time"` | Časová zóna pro auto-shutdown                                        |
-
-## Terraform outputs
-
-| Output           | Popis                                       |
-| ---------------- | ------------------------------------------- |
-| `vm_id`          | Azure resource ID VM                        |
-| `vm_private_ip`  | Privátní IP v Azure VNet (ne Tailscale IP)  |
-| `tailscale_note` | Instrukce jak najít Tailscale IP            |
-| `portainer_url`  | URL Portaineru (s Tailscale IP placeholder) |
-| `ssh_command`    | Příkaz pro SSH připojení                    |
-
-Tailscale IP není známá při `terraform apply` — VM ji dostane až po startu. Output obsahuje instrukce: `tailscale status` nebo zkontrolujte Tailscale admin konzoli.
-
-## Struktura projektu
-
-```
-devbox-infra/
-  ├── main.tf                 ← provider, data source pro resource group
-  ├── variables.tf            ← vstupní proměnné
-  ├── outputs.tf              ← výstupní hodnoty
-  ├── vm.tf                   ← VM, NIC, NSG, VNet
-  ├── cloud-init.tpl          ← cloud-init šablona (Docker, Tailscale, Portainer)
-  ├── terraform.tfvars.example ← příklad konfigurace
-  ├── .gitignore              ← terraform.tfvars, .terraform/, *.tfstate
-  ├── CLAUDE.md               ← tento soubor
-  └── README.md
-```
-
-## Použití
-
-```bash
-# 1. Nakonfigurujte proměnné
-cp terraform.tfvars.example terraform.tfvars
-# Upravte terraform.tfvars — resource_group_name, tailscale_auth_key
-
-# 2. Přihlaste se do Azure
-az login
-
-# 3. Inicializujte Terraform
-terraform init
-
-# 4. Zkontrolujte plán
-terraform plan
-
-# 5. Vytvořte VM
-terraform apply
-
-# 6. Počkejte ~3 minuty na cloud-init, pak:
-#    - Najděte Tailscale IP v admin konzoli (https://login.tailscale.com/admin/machines)
-#    - Otevřete Portainer: https://<tailscale_ip>:9443
-#    - VS Code: Remote-SSH → <admin_username>@<tailscale_ip>
-```
-
-## Denní workflow
+### Denní workflow (Azure)
 
 ```bash
 # Ráno — nastartujte VM (pokud byla auto-shutdown)
 az vm start -g <resource_group> -n devbox
 
 # VM naběhne, Tailscale se automaticky připojí, Portainer a kontejnery běží
-# → VS Code → Remote-SSH → otevřete devcontainer repo → Reopen in Container
 
 # Večer — VM se vypne automaticky ve 22:00 (auto-shutdown)
 # Nebo ručně:
 az vm deallocate -g <resource_group> -n devbox
 ```
 
-**Důležité:** `deallocate` (ne `stop`) uvolní compute hardware a přestanete platit za CPU. Disk zůstává a platíte jen za něj (~€8/měsíc za 128 GB Standard SSD). Data na disku (Docker images, volumes, projekty) přežijí deallocate.
+`deallocate` (ne `stop`) uvolní compute hardware a přestanete platit za CPU. Disk zůstává (~€8/měsíc za 128 GB Standard SSD). Data přežijí deallocate.
 
-## Cenová kalkulace
+## Debian target
 
-| Položka                      | Cena           |
-| ---------------------------- | -------------- |
-| B4as_v2 compute (242h/měsíc) | ~€37/měsíc     |
-| 128 GB Standard SSD (24/7)   | ~€8/měsíc      |
-| **Celkem**                   | **~€45/měsíc** |
+`debian/install.sh` orchestruje volání skriptů:
+1. Kontrola: ne-root + sudo přístup
+2. Prerequisity: `curl`, `ca-certificates`, `gnupg`, `git`
+3. Docker (přeskočí pokud existuje)
+4. Tailscale (volitelný, `--tailscale KEY`)
+5. Portainer
+6. Shared volumes
 
-Předpoklad: pracovní dny 7:00–18:00 (~242h/měsíc). Auto-shutdown ve 22:00 jako pojistka.
+Konfigurace přes CLI flags (`--username`, `--tailscale`, `--tailscale-hostname`).
 
-## Konvence kódu
+## Jak se připojit
 
-- Terraform ≥ 1.5
-- AzureRM provider ≥ 3.0
-- Soubory rozdělené podle účelu (vm.tf, variables.tf, outputs.tf)
-- Žádné moduly — flat struktura, jednoduchost
-- Cloud-init jako template file (`.tpl`), ne inline
-- Sensitive proměnné označené `sensitive = true`
-- Žádné hardcoded hodnoty — vše přes proměnné s rozumnými defaulty
+### VS Code (přes Docker socket)
+
+1. Remote-SSH → `<user>@<tailscale_ip_nebo_hostname>`
+2. SSH session na hostu (port 22)
+3. Otevřete projekt → "Reopen in Container" → VS Code přes `docker exec` spustí server uvnitř kontejneru
+4. Víc VS Code oken = víc SSH sessions přes stejný port 22
+
+### PyCharm / JetBrains (přes SSH port do kontejneru)
+
+JetBrains IDE neumí Dev Containers. Používá SSH Remote Interpreter přímo do kontejneru:
+- Host: `<tailscale_ip>`, Port: 2222 (nebo 2223, 2224...), User: `node`
+- Každý kontejner má unikátní SSH port
+
+### Portainer (prohlížeč)
+
+- `https://<hostname>:9443`
+- Start/stop kontejnerů, logy, resource monitoring
+
+### Terminál
+
+- SSH na host → `docker exec -it <kontejner> bash`
 
 ## Bezpečnost
 
-- Žádná veřejná IP — přístup výhradně přes Tailscale VPN
-- NSG povoluje jen Tailscale UDP port 41641 (pro přímé P2P spojení, snižuje latenci)
-- SSH klíč jako fallback autentizace, primárně Tailscale SSH
-- Tailscale auth key je sensitive — nikdy v gitu, jen v `.tfvars` (gitignored)
-- Portainer přístupný jen z Tailscale sítě
-- VM uživatel je v `docker` skupině, ne root
+- **Azure:** žádná veřejná IP — přístup výhradně přes Tailscale VPN
+- NSG povoluje jen Tailscale UDP port 41641 (přímé P2P spojení)
+- **Debian:** přístup přes LAN nebo Tailscale
+- Tailscale SSH umožňuje přístup bez správy SSH klíčů (`tailscale up --ssh`)
+- Portainer přístupný jen z Tailscale sítě / LAN
+- VM/server uživatel je v `docker` skupině, ne root
+- Sensitive data nikdy v gitu (terraform.tfvars v .gitignore)
 
-## TODO
+## Konvence
 
-- [ ] main.tf — provider azurerm, data source pro resource group
-- [ ] variables.tf — všechny proměnné s popisy a defaulty
-- [ ] vm.tf — VNet, Subnet, NSG, NIC, VM, auto-shutdown
-- [ ] cloud-init.tpl — Docker, Tailscale, Portainer, claude-shared volume
-- [ ] outputs.tf — VM ID, IP, instrukce
-- [ ] terraform.tfvars.example
-- [ ] .gitignore
-- [ ] README.md
+- Bash skripty: `set -euo pipefail`, `shellcheck` clean
+- Terraform: >= 1.5, AzureRM >= 3.0, flat struktura v `azure/`
+- Sensitive data: nikdy v gitu (terraform.tfvars v .gitignore)
+- Commit messages: conventional commits (feat/fix/docs)
