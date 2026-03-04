@@ -110,6 +110,48 @@ resource "azurerm_linux_virtual_machine" "main" {
     admin_username     = var.admin_username
     vm_name            = var.vm_name
   }))
+
+  lifecycle {
+    ignore_changes = [os_disk[0].disk_size_gb, os_disk[0].storage_account_type]
+  }
+}
+
+# -----------------------------------------------------------------------------
+# OS Disk update (deallocate → change → start, same as Azure Portal)
+# -----------------------------------------------------------------------------
+
+resource "terraform_data" "os_disk_update" {
+  triggers_replace = {
+    disk_size_gb = var.os_disk_size_gb
+    disk_type    = var.os_disk_type
+  }
+
+  provisioner "local-exec" {
+    command = <<-EOT
+      set -e
+      DISK_NAME="${var.vm_name}-osdisk"
+      RG="${data.azurerm_resource_group.main.name}"
+      VM_NAME="${var.vm_name}"
+      DESIRED_SIZE="${var.os_disk_size_gb}"
+      DESIRED_TYPE="${var.os_disk_type}"
+
+      CURRENT_SIZE=$(az disk show -g "$RG" -n "$DISK_NAME" --query "diskSizeGb" -o tsv 2>/dev/null || echo "")
+      CURRENT_TYPE=$(az disk show -g "$RG" -n "$DISK_NAME" --query "sku.name" -o tsv 2>/dev/null || echo "")
+
+      if [ "$CURRENT_SIZE" = "$DESIRED_SIZE" ] && [ "$CURRENT_TYPE" = "$DESIRED_TYPE" ]; then
+        echo "OS disk already has desired configuration. Skipping."
+        exit 0
+      fi
+
+      echo "Updating OS disk: size $${CURRENT_SIZE:-?}→$${DESIRED_SIZE}GB, type $${CURRENT_TYPE:-?}→$${DESIRED_TYPE}"
+      az vm deallocate -g "$RG" -n "$VM_NAME"
+      az disk update -g "$RG" -n "$DISK_NAME" --size-gb "$DESIRED_SIZE" --sku "$DESIRED_TYPE"
+      az vm start -g "$RG" -n "$VM_NAME"
+      echo "Done."
+    EOT
+  }
+
+  depends_on = [azurerm_linux_virtual_machine.main]
 }
 
 # -----------------------------------------------------------------------------
