@@ -24,9 +24,15 @@ TAILSCALE_HOSTNAME="devbox"
 # Parse arguments
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --username)           USERNAME="$2"; shift 2 ;;
-    --tailscale)          TAILSCALE_AUTH_KEY="$2"; shift 2 ;;
-    --tailscale-hostname) TAILSCALE_HOSTNAME="$2"; shift 2 ;;
+    --username)
+      [[ -z "${2:-}" || "$2" == --* ]] && { echo "ERROR: --username requires a value" >&2; exit 1; }
+      USERNAME="$2"; shift 2 ;;
+    --tailscale)
+      [[ -z "${2:-}" || "$2" == --* ]] && { echo "ERROR: --tailscale requires a value" >&2; exit 1; }
+      TAILSCALE_AUTH_KEY="$2"; shift 2 ;;
+    --tailscale-hostname)
+      [[ -z "${2:-}" || "$2" == --* ]] && { echo "ERROR: --tailscale-hostname requires a value" >&2; exit 1; }
+      TAILSCALE_HOSTNAME="$2"; shift 2 ;;
     -h|--help)            usage ;;
     *) echo "Unknown option: $1" >&2; exit 1 ;;
   esac
