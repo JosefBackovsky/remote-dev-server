@@ -33,3 +33,7 @@ runcmd:
   - /opt/setup/tailscale.sh ${tailscale_auth_key} ${vm_name}
   - /opt/setup/portainer.sh
   - /opt/setup/shared-volumes.sh ${admin_username}
+  # Portal: install manually after provisioning (requires multi-file build)
+  # scp -r scripts/portal/ <host>:/opt/setup/portal/
+  # scp scripts/portal.sh <host>:/opt/setup/
+  # ssh <host> /opt/setup/portal.sh

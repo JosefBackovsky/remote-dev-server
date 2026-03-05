@@ -66,6 +66,7 @@ Každý skript v `scripts/` je:
 | `tailscale.sh <key> [hostname]` | `tailscale status` | Instalace + `tailscale up --ssh` |
 | `portainer.sh [domain]` | `docker ps -a` + TLS mismatch | Nový kontejner (s/bez TLS), `docker start` pokud stopped, recreate při TLS změně |
 | `certbot.sh <domain> <credentials> <email>` | `/etc/letsencrypt/live/$domain` | Certbot venv, cert via Azure DNS challenge, cron renewal, post-renewal hook |
+| `portal.sh [--domain D] [--cert-dir DIR] [--rebuild]` | `docker ps -a` pro kontejner `portal` | Build + run Portal dashboard, HTTP nebo HTTPS |
 | `shared-volumes.sh <user>` | Přirozeně idempotentní | `docker volume create claude-shared`, `mkdir -p ~/projects` |
 
 ## Azure target

@@ -44,16 +44,20 @@ cat > /etc/cron.d/certbot-renew <<'CRON'
 0 3,15 * * * root /opt/certbot/bin/certbot renew --quiet
 CRON
 
-# Post-renewal hook — restart Portainer to pick up new certificate
+# Post-renewal hooks — restart containers to pick up new certificate
 mkdir -p /etc/letsencrypt/renewal-hooks/deploy
-cat > /etc/letsencrypt/renewal-hooks/deploy/restart-portainer.sh <<'HOOK'
+cat > /etc/letsencrypt/renewal-hooks/deploy/restart-tls-containers.sh <<'HOOK'
 #!/usr/bin/env bash
-# Restart Portainer after certificate renewal so it picks up the new cert
-if docker ps --format '{{.Names}}' | grep -q '^portainer$'; then
-  docker restart portainer
-fi
+# Restart containers that use TLS after certificate renewal
+for name in portainer portal; do
+  if docker ps --format '{{.Names}}' | grep -q "^${name}$"; then
+    docker restart "$name"
+  fi
+done
 HOOK
-chmod +x /etc/letsencrypt/renewal-hooks/deploy/restart-portainer.sh
+chmod +x /etc/letsencrypt/renewal-hooks/deploy/restart-tls-containers.sh
+# Clean up old single-container hook if it exists
+rm -f /etc/letsencrypt/renewal-hooks/deploy/restart-portainer.sh
 
 echo "Certificate for ${DOMAIN} obtained successfully."
 echo "Auto-renewal cron installed at /etc/cron.d/certbot-renew"

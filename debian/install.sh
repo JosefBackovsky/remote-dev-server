@@ -121,14 +121,19 @@ sudo "${SCRIPTS_DIR}/shared-volumes.sh" "$USERNAME"
 
 # Portal (server dashboard)
 echo "--- Installing Portal ---"
-"${SCRIPTS_DIR}/portal.sh"
+if [[ -n "$DOMAIN" ]]; then
+  "${SCRIPTS_DIR}/portal.sh" --domain "$DOMAIN" --cert-dir "/etc/letsencrypt/live/${DOMAIN}"
+else
+  "${SCRIPTS_DIR}/portal.sh"
+fi
 
 echo ""
 echo "=== Done! ==="
-echo "Portal:    http://$(hostname)"
 if [[ -n "$DOMAIN" ]]; then
+  echo "Portal:    https://${DOMAIN}"
   echo "Portainer: https://${DOMAIN}:9443"
 else
+  echo "Portal:    http://$(hostname)"
   echo "Portainer: https://$(hostname):9443"
 fi
 echo ""

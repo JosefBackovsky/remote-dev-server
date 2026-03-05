@@ -1,6 +1,6 @@
 # remote-dev-server
 
-Setup scripts for remote development host — Docker, Portainer, shared volumes, and optionally Tailscale. Supports both Azure VM (Terraform) and Debian home server.
+Setup scripts for remote development host — Docker, Portainer, Portal dashboard, and optionally Tailscale + Let's Encrypt TLS. Supports both Azure VM (Terraform) and Debian home server.
 
 ## Architecture
 
@@ -12,6 +12,8 @@ MacBook (VS Code / PyCharm / browser)
 Dev Host (Azure VM or Debian server)
 ├── Docker Engine
 ├── Tailscale (optional on Debian)
+├── Let's Encrypt certs (optional, via certbot + Azure DNS)
+├── Portal (server dashboard, port 80/443)
 ├── Portainer (web UI, port 9443)
 ├── devcontainer per project (SSH ports 2222+)
 ├── Docker volumes (claude-shared, per-project)
@@ -27,15 +29,27 @@ scp -r scripts/ debian/ user@server:~/remote-dev-server/
 # 2. SSH and install
 ssh user@server
 cd ~/remote-dev-server
-./debian/install.sh                    # defaults are fine for most setups
-./debian/install.sh --tailscale KEY    # optionally install Tailscale
-./debian/install.sh --help             # see all options
+
+# Minimal (Docker + Portainer + Portal)
+./debian/install.sh
+
+# With Tailscale
+./debian/install.sh --tailscale KEY
+
+# With Let's Encrypt TLS (requires Azure DNS for validation)
+./debian/install.sh --tailscale KEY \
+  --domain myhost.example.com \
+  --azure-credentials /path/to/azure-dns-creds.ini \
+  --certbot-email user@example.com
+
+# All options
+./debian/install.sh --help
 
 # 3. Re-login (for Docker group), then verify:
 docker run --rm hello-world
 ```
 
-**Note:** If a local firewall (`ufw`, `nftables`) is running, open port 9443 for Portainer access.
+**Note:** If a local firewall (`ufw`, `nftables`) is running, open ports 80 (Portal), 443 (Portal HTTPS), and 9443 (Portainer).
 
 ## Quick Start: Azure VM
 
@@ -68,7 +82,14 @@ remote-dev-server/
 ├── scripts/                    # Shared setup scripts
 │   ├── docker.sh               # Install Docker Engine (Ubuntu + Debian)
 │   ├── tailscale.sh            # Install and configure Tailscale
-│   ├── portainer.sh            # Run Portainer container
+│   ├── certbot.sh              # Let's Encrypt cert via Azure DNS challenge
+│   ├── portainer.sh            # Run Portainer container (with optional TLS)
+│   ├── portal.sh               # Run Portal dashboard container
+│   ├── portal/                 # Portal app source (Python/FastAPI)
+│   │   ├── app.py
+│   │   ├── Dockerfile
+│   │   ├── requirements.txt
+│   │   └── templates/index.html
 │   └── shared-volumes.sh      # Create claude-shared volume + ~/projects
 ├── azure/                      # Azure VM target (Terraform)
 │   ├── main.tf
@@ -89,9 +110,60 @@ All scripts in `scripts/` are idempotent (safe to run multiple times), distro-ag
 | Script | Purpose | Parameters |
 |--------|---------|------------|
 | `docker.sh` | Install Docker Engine + compose plugin | `<username>` |
-| `tailscale.sh` | Install Tailscale + `tailscale up` | `<auth_key> [hostname]` |
-| `portainer.sh` | Run Portainer CE container | — |
+| `tailscale.sh` | Install Tailscale + `tailscale up --ssh` | `<auth_key> [hostname]` |
+| `certbot.sh` | Let's Encrypt cert via Azure DNS challenge | `<domain> <azure-credentials-file> <email>` |
+| `portainer.sh` | Run Portainer CE container (TLS if domain given) | `[domain]` |
+| `portal.sh` | Build and run Portal dashboard | `[--domain D] [--cert-dir DIR] [--rebuild]` |
 | `shared-volumes.sh` | Create `claude-shared` volume + `~/projects` | `<username>` |
+
+## Portal Dashboard
+
+The Portal is a lightweight web dashboard (Python/FastAPI) that auto-discovers all running Docker containers and displays them grouped by Docker Compose project with clickable links.
+
+**Features:**
+- Auto-discovery via Docker socket — no manual configuration
+- Groups services by Docker Compose project
+- Status indicators (running/healthy/unhealthy/stopped)
+- Clickable port links with correct hostname
+- Auto-refresh every 10 seconds
+- Optional HTTPS with Let's Encrypt certificates
+
+**Standalone deploy:**
+
+```bash
+# HTTP only
+scripts/portal.sh
+
+# With custom domain (used in generated links)
+scripts/portal.sh --domain cc-ts.backovsky.eu
+
+# With HTTPS (Let's Encrypt cert)
+scripts/portal.sh --domain cc-ts.backovsky.eu \
+  --cert-dir /etc/letsencrypt/live/cc-ts.backovsky.eu
+
+# Force rebuild after code changes
+scripts/portal.sh --rebuild
+```
+
+**Hostname detection priority:** `PORTAL_DOMAIN` env var → Tailscale DNS name → system hostname.
+
+## Let's Encrypt TLS
+
+Optional TLS certificate via certbot with Azure DNS validation. Used by both Portainer and Portal.
+
+```bash
+# Obtain certificate
+sudo scripts/certbot.sh myhost.example.com /path/to/azure-dns-creds.ini user@example.com
+
+# Azure DNS credentials file format (INI):
+# dns_azure_sp_client_id = ...
+# dns_azure_sp_client_secret = ...
+# dns_azure_tenant_id = ...
+# dns_azure_environment = AzurePublicCloud
+# dns_azure_zone1 = example.com:/subscriptions/.../resourceGroups/.../providers/Microsoft.Network/dnsZones/example.com
+```
+
+Auto-renewal runs via cron (twice daily). Post-renewal hook restarts Portainer to pick up the new cert.
 
 ## Azure Variables
 
@@ -139,11 +211,27 @@ terraform apply
 
 Assumes weekday usage 7:00–18:00 (~242h/month). Auto-shutdown at 22:00 as safety net.
 
+## Debian Install Options
+
+| Flag | Description |
+|------|-------------|
+| `--username USER` | User for Docker group and ~/projects (default: current user) |
+| `--tailscale KEY` | Install Tailscale with the given auth key |
+| `--tailscale-hostname H` | Tailscale hostname (default: `devbox`) |
+| `--domain DOMAIN` | Domain for Let's Encrypt TLS certificate |
+| `--azure-credentials FILE` | Path to Azure DNS credentials file (required with `--domain`) |
+| `--certbot-email EMAIL` | Email for Let's Encrypt registration (required with `--domain`) |
+
+When `--domain` is provided, the install script will:
+1. Obtain a Let's Encrypt certificate via Azure DNS challenge
+2. Start Portainer with TLS using the certificate
+3. Start Portal with HTTPS and the domain in generated links
+
 ## Network Prerequisites
 
 - Server must have internet access during installation
 - If installation fails midway, re-run the install script — all scripts are idempotent
-- For Debian: if `ufw` or `nftables` is active, ensure port 9443 is open for Portainer
+- For Debian: if `ufw` or `nftables` is active, ensure ports 80 (Portal), 443 (Portal HTTPS), and 9443 (Portainer) are open
 
 ## Cleanup
 
