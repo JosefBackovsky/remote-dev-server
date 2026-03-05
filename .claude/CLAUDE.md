@@ -64,7 +64,8 @@ Každý skript v `scripts/` je:
 |--------|-------|---------|
 | `docker.sh <user>` | `command -v docker` | Instalace Docker CE, daemon.json (před startem), user do docker group |
 | `tailscale.sh <key> [hostname]` | `tailscale status` | Instalace + `tailscale up --ssh` |
-| `portainer.sh` | `docker ps -a` | Nový kontejner, nebo `docker start` pokud stopped |
+| `portainer.sh [domain]` | `docker ps -a` + TLS mismatch | Nový kontejner (s/bez TLS), `docker start` pokud stopped, recreate při TLS změně |
+| `certbot.sh <domain> <credentials> <email>` | `/etc/letsencrypt/live/$domain` | Certbot venv, cert via Azure DNS challenge, cron renewal, post-renewal hook |
 | `shared-volumes.sh <user>` | Přirozeně idempotentní | `docker volume create claude-shared`, `mkdir -p ~/projects` |
 
 ## Azure target
@@ -113,10 +114,12 @@ az vm deallocate -g <resource_group> -n devbox
 2. Prerequisity: `curl`, `ca-certificates`, `gnupg`, `git`
 3. Docker (přeskočí pokud existuje)
 4. Tailscale (volitelný, `--tailscale KEY`)
-5. Portainer
-6. Shared volumes
+5. Certbot (volitelný, `--domain DOMAIN --azure-credentials FILE --certbot-email EMAIL`)
+6. Portainer (s TLS pokud je `--domain`)
+7. Shared volumes
+8. Portal
 
-Konfigurace přes CLI flags (`--username`, `--tailscale`, `--tailscale-hostname`).
+Konfigurace přes CLI flags (`--username`, `--tailscale`, `--tailscale-hostname`, `--domain`, `--azure-credentials`, `--certbot-email`).
 
 ## Jak se připojit
 
@@ -149,6 +152,8 @@ JetBrains IDE neumí Dev Containers. Používá SSH Remote Interpreter přímo d
 - **Debian:** přístup přes LAN nebo Tailscale
 - Tailscale SSH umožňuje přístup bez správy SSH klíčů (`tailscale up --ssh`)
 - Portainer přístupný jen z Tailscale sítě / LAN
+- Let's Encrypt certifikáty (volitelné) — validní TLS pro Portainer, auto-renewal přes cron
+- Azure DNS credentials (pro certbot) — permissions 600
 - VM/server uživatel je v `docker` skupině, ne root
 - Sensitive data nikdy v gitu (terraform.tfvars v .gitignore)
 
