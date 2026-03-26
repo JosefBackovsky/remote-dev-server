@@ -99,7 +99,7 @@ def get_services() -> dict:
             "name": service_name,
             "container_name": c.name,
             "status": health,
-            "image": c.image.tags[0] if c.image.tags else str(c.image.id)[:20],
+            "image": (c.image.tags[0] if c.image.tags else str(c.image.id)[:20]) if c.image else "unknown",
             "ports": sorted(ports, key=lambda p: int(p["host_port"])),
         }
 
