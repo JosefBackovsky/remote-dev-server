@@ -84,12 +84,7 @@ remote-dev-server/
 │   ├── tailscale.sh            # Install and configure Tailscale
 │   ├── certbot.sh              # Let's Encrypt cert via Azure DNS challenge
 │   ├── portainer.sh            # Run Portainer container (with optional TLS)
-│   ├── portal.sh               # Run Portal dashboard container
-│   ├── portal/                 # Portal app source (Python/FastAPI)
-│   │   ├── app.py
-│   │   ├── Dockerfile
-│   │   ├── requirements.txt
-│   │   └── templates/index.html
+│   ├── portal.sh               # Deploy Portal from Docker Hub image
 │   └── shared-volumes.sh      # Create claude-shared volume + ~/projects
 ├── azure/                      # Azure VM target (Terraform)
 │   ├── main.tf
@@ -113,7 +108,7 @@ All scripts in `scripts/` are idempotent (safe to run multiple times), distro-ag
 | `tailscale.sh` | Install Tailscale + `tailscale up --ssh` | `<auth_key> [hostname]` |
 | `certbot.sh` | Let's Encrypt cert via Azure DNS challenge | `<domain> <azure-credentials-file> <email>` |
 | `portainer.sh` | Run Portainer CE container (TLS if domain given) | `[domain]` |
-| `portal.sh` | Build and run Portal dashboard | `[--domain D] [--cert-dir DIR] [--rebuild]` |
+| `portal.sh` | Deploy Portal from Docker Hub image | `[--domain D] [--cert-dir DIR] [--rebuild]` |
 | `shared-volumes.sh` | Create `claude-shared` volume + `~/projects` | `<username>` |
 
 ## Portal Dashboard
@@ -128,7 +123,9 @@ The Portal is a lightweight web dashboard (Python/FastAPI) that auto-discovers a
 - Auto-refresh every 10 seconds
 - Optional HTTPS with Let's Encrypt certificates
 
-**Standalone deploy:**
+**Source code:** [`cc-remote-services/portal/`](https://github.com/JosefBackovsky/cc-remote-services/tree/main/portal) (separate monorepo, built via GitHub Actions, pushed to Docker Hub)
+
+**Deploy:**
 
 ```bash
 # HTTP only
@@ -141,7 +138,7 @@ scripts/portal.sh --domain cc-ts.backovsky.eu
 scripts/portal.sh --domain cc-ts.backovsky.eu \
   --cert-dir /etc/letsencrypt/live/cc-ts.backovsky.eu
 
-# Force rebuild after code changes
+# Pull new image from Docker Hub and recreate container
 scripts/portal.sh --rebuild
 ```
 
