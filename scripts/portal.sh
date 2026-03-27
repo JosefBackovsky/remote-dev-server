@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-DOCKER_IMAGE="longerp/cc-remote-portal:latest"
+DOCKER_IMAGE="josefbackovsky/cc-remote-portal:latest"
 
 usage() {
   cat <<EOF
