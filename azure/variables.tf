@@ -62,3 +62,9 @@ variable "auto_shutdown_timezone" {
   type        = string
   default     = "Central Europe Standard Time"
 }
+
+variable "portal_domain" {
+  description = "Domain for Portal dashboard links (e.g. cc-ts.backovsky.eu). If empty, Tailscale hostname auto-detection is used."
+  type        = string
+  default     = ""
+}

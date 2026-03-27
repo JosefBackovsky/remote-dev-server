@@ -109,10 +109,12 @@ resource "azurerm_linux_virtual_machine" "main" {
     tailscale_auth_key = var.tailscale_auth_key
     admin_username     = var.admin_username
     vm_name            = var.vm_name
+    portal_domain      = var.portal_domain
     docker_sh          = file("${path.module}/../scripts/docker.sh")
     tailscale_sh       = file("${path.module}/../scripts/tailscale.sh")
     portainer_sh       = file("${path.module}/../scripts/portainer.sh")
     shared_volumes_sh  = file("${path.module}/../scripts/shared-volumes.sh")
+    portal_sh          = file("${path.module}/../scripts/portal.sh")
   }))
 
   lifecycle {

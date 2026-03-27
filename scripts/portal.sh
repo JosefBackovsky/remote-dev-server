@@ -1,19 +1,21 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+DOCKER_IMAGE="longerp/cc-remote-portal:latest"
 
 usage() {
   cat <<EOF
 Usage: $(basename "$0") [OPTIONS]
 
-Deploy the Server Portal dashboard container.
+Deploy the Server Portal dashboard container from Docker Hub.
+
+Image: $DOCKER_IMAGE
 
 Options:
   --domain DOMAIN       Custom domain for links (e.g. cc-ts.backovsky.eu)
   --cert-dir DIR        Let's Encrypt cert directory (e.g. /etc/letsencrypt/live/cc-ts.backovsky.eu)
                         Enables HTTPS on port 443. Expects fullchain.pem and privkey.pem.
-  --rebuild             Force rebuild of the image (removes existing container)
+  --rebuild             Force pull new image and recreate container
   -h, --help            Show this help
 EOF
   exit 0
@@ -56,7 +58,7 @@ if [[ "$REBUILD" == true ]]; then
   fi
 fi
 
-# Idempotentní — pokud kontejner existuje, zajistit že běží
+# Idempotent — if container exists, ensure it's running
 if docker ps -a --format '{{.Names}}' | grep -q '^portal$'; then
   if ! docker ps --format '{{.Names}}' | grep -q '^portal$'; then
     echo "Portal is stopped, starting..."
@@ -67,8 +69,9 @@ if docker ps -a --format '{{.Names}}' | grep -q '^portal$'; then
   exit 0
 fi
 
-echo "Building portal image..."
-docker build -t server-portal "$SCRIPT_DIR/portal"
+echo "Pulling portal image..."
+docker pull "$DOCKER_IMAGE"
+docker tag "$DOCKER_IMAGE" server-portal
 
 # Build docker run command
 RUN_ARGS=(
